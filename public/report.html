@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>GMC Guardian – Compliance Report</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background: #f8fafc;
+    }
+    .card {
+      background: white;
+      border-radius: 1rem;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05), 0 10px 15px -5px rgba(0,0,0,0.05);
+      transition: all 0.2s;
+    }
+    .score-ring {
+      transform: rotate(-90deg);
+    }
+    .score-ring circle {
+      transition: stroke-dasharray 0.6s ease;
+    }
+    .category-card {
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .category-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 20px -10px rgba(0,0,0,0.1);
+    }
+    .toggle-icon {
+      transition: transform 0.2s;
+    }
+    .section-header.open .toggle-icon {
+      transform: rotate(180deg);
+    }
+    .check-list {
+      transition: all 0.2s;
+    }
+    @media print {
+      body {
+        background: white;
+        padding: 0;
+        margin: 0;
+      }
+      .card {
+        box-shadow: none;
+        border: 1px solid #e2e8f0;
+      }
+      .no-print {
+        display: none;
+      }
+      .print-break {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
+</head>
+<body class="antialiased">
+
+  <!-- Header with Print/Close buttons -->
+  <div class="sticky top-0 z-10 bg-white/80 backdrop-blur-sm border-b border-gray-200 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+      <div class="flex items-center gap-2">
+        <span class="text-2xl">🛡️</span>
+        <span class="font-bold text-gray-800">GMC Guardian</span>
+      </div>
+      <div class="flex gap-2">
+        <button id="printPdfBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition flex items-center gap-1">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"/></svg>
+          Download PDF
+        </button>
+        <button id="closeReportBtn" class="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm font-medium transition">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-8 print:p-0">
+    <!-- Report will be injected here -->
+    <div id="reportContainer">
+      <div class="text-center py-12">
+        <div class="inline-block animate-pulse">
+          <div class="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+        </div>
+        <p class="mt-4 text-gray-600">Loading report...</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Helper functions for styling
+    function scoreColor(s) {
+      if (s >= 90) return '#22c55e';   // green
+      if (s >= 60) return '#f59e0b';   // orange/yellow
+      return '#ef4444';                // red
+    }
+    function statusIcon(s) {
+      return s === 'pass' ? '✓' : s === 'warning' ? '!' : '✕';
+    }
+    function statusClass(s) {
+      return s === 'pass' ? 'bg-green-100 text-green-800 border-green-200' : s === 'warning' ? 'bg-yellow-100 text-yellow-800 border-yellow-200' : 'bg-red-100 text-red-800 border-red-200';
+    }
+    function fixClass(s) {
+      return s === 'warning' ? 'bg-yellow-50 border-l-4 border-yellow-400 text-yellow-800' : 'bg-red-50 border-l-4 border-red-400 text-red-800';
+    }
+    function fixActionClass(s) {
+      return s === 'warning' ? 'bg-yellow-50 border-l-4 border-yellow-400' : 'bg-red-50 border-l-4 border-red-400';
+    }
+    function impBadge(imp) {
+      const map = { critical: 'bg-red-100 text-red-800', important: 'bg-yellow-100 text-yellow-800', recommended: 'bg-blue-100 text-blue-800' };
+      return imp ? `<span class="ml-2 px-2 py-0.5 text-xs font-medium rounded-full ${map[imp] || 'bg-gray-100 text-gray-600'}">${imp}</span>` : '';
+    }
+    function miniArc(score, color) {
+      const circ = 2 * Math.PI * 24;
+      const fill = (score / 100) * circ;
+      return `<svg viewBox="0 0 60 60" class="w-12 h-12">
+        <circle cx="30" cy="30" r="24" fill="none" stroke="#e2e8f0" stroke-width="5"/>
+        <circle cx="30" cy="30" r="24" fill="none" stroke="${color}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${fill} ${circ}" style="transform: rotate(-90deg); transform-origin: center;"/>
+      </svg>`;
+    }
+    function setMainArc(score, color) {
+      const circ = 2 * Math.PI * 52;
+      const fill = (score / 100) * circ;
+      const arc = document.getElementById('mainArc');
+      if (arc) {
+        arc.setAttribute('stroke-dasharray', `${fill} ${circ}`);
+        arc.setAttribute('stroke', color);
+      }
+    }
+
+    function render(data) {
+      const { meta, overallScore, summary, categories } = data;
+      const container = document.getElementById('reportContainer');
+      container.innerHTML = '';
+
+      // Override readiness based on new thresholds
+      let readiness;
+      if (overallScore >= 90) {
+        readiness = 'Ready to Submit';
+      } else if (overallScore >= 60) {
+        readiness = 'Needs Improvement';
+      } else {
+        readiness = 'Critical Issues Found';
+      }
+
+      // Define hero subtext and badge map for the new readiness levels
+      const subMap = {
+        'Ready to Submit': 'Your store meets the highest compliance standards. You are ready to apply to Google Merchant Center.',
+        'Needs Improvement': 'Several issues need to be resolved before GMC submission.',
+        'Critical Issues Found': 'Critical issues must be fixed before applying to Google Merchant Center.'
+      };
+
+      const badgeMap = {
+        'Ready to Submit':   { icon:'🎉', color:'#f0fdf4', border:'#bbf7d0', sub:'Ready for GMC submission' },
+        'Needs Improvement': { icon:'⚠️', color:'#fffbeb', border:'#fde68a', sub:'Fix issues before submitting' },
+        'Critical Issues Found': { icon:'🚨', color:'#fef2f2', border:'#fecaca', sub:'Do not submit yet' },
+      };
+
+      // Build HTML
+      let html = `
+        <!-- Header Info -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8 print-break">
+          <div class="flex flex-wrap justify-between gap-4">
+            <div>
+              <h1 class="text-2xl font-bold text-gray-800">Compliance Report</h1>
+              <p class="text-gray-500 text-sm mt-1">Google Merchant Center audit for ${meta.domain}</p>
+            </div>
+            <div class="text-right">
+              <p class="text-sm text-gray-500">Report generated: ${new Date(meta.timestamp).toLocaleString()}</p>
+              <p class="text-sm text-gray-500">Total checks: ${summary.total}</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Hero Card -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8 grid grid-cols-1 md:grid-cols-3 gap-6 items-center print-break">
+          <div class="relative w-32 h-32 mx-auto md:mx-0">
+            <svg viewBox="0 0 120 120" class="w-32 h-32">
+              <circle cx="60" cy="60" r="52" fill="none" stroke="#e2e8f0" stroke-width="10"/>
+              <circle id="mainArc" cx="60" cy="60" r="52" fill="none" stroke="#3b82f6" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 327"/>
+            </svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <div class="text-center">
+                <div class="text-4xl font-bold text-gray-800">${overallScore}</div>
+                <div class="text-xs text-gray-500">/ 100</div>
+              </div>
+            </div>
+          </div>
+          <div class="text-center md:text-left">
+            <h2 class="text-xl font-bold text-gray-800">${readiness}</h2>
+            <p class="text-gray-500 text-sm mt-1">${subMap[readiness]}</p>
+          </div>
+          <div class="rounded-xl p-4 text-center" style="background: ${badgeMap[readiness].color}; border: 1px solid ${badgeMap[readiness].border}">
+            <div class="text-3xl">${badgeMap[readiness].icon}</div>
+            <div class="font-semibold text-gray-800 mt-1">${readiness}</div>
+            <div class="text-xs text-gray-500">${badgeMap[readiness].sub}</div>
+          </div>
+        </div>
+
+        <!-- Summary Bars -->
+        <div class="bg-white rounded-2xl shadow-sm p-6 mb-8 print-break">
+          <h3 class="text-lg font-semibold text-gray-800 mb-4">Summary</h3>
+          <div class="space-y-3">
+            <div>
+              <div class="flex justify-between text-sm mb-1"><span>✅ Passing</span><span>${summary.passing}</span></div>
+              <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-green-500 rounded-full" style="width: ${(summary.passing/summary.total*100).toFixed(1)}%"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><span>⚠️ Warnings</span><span>${summary.warnings}</span></div>
+              <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-yellow-500 rounded-full" style="width: ${(summary.warnings/summary.total*100).toFixed(1)}%"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-sm mb-1"><span>❌ Critical</span><span>${summary.failing}</span></div>
+              <div class="h-2 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-red-500 rounded-full" style="width: ${(summary.failing/summary.total*100).toFixed(1)}%"></div></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Category Scores -->
+        <h3 class="text-xl font-bold text-gray-800 mb-4">Category Scores</h3>
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+      `;
+
+      categories.forEach(cat => {
+        const sc = cat.score;
+        const col = scoreColor(sc);
+        const pass = cat.checks.filter(c=>c.status==='pass').length;
+        const warn = cat.checks.filter(c=>c.status==='warning').length;
+        const fail = cat.checks.filter(c=>c.status==='fail').length;
+        html += `
+          <div class="bg-white rounded-xl shadow-sm p-4 text-center category-card">
+            <div class="text-2xl mb-2">${cat.icon}</div>
+            <div class="text-xs font-medium text-gray-500 mb-2">${cat.name}</div>
+            <div class="relative inline-block">
+              ${miniArc(sc, col)}
+              <div class="absolute inset-0 flex items-center justify-center">
+                <span class="text-sm font-bold" style="color: ${col}">${sc}</span>
+              </div>
+            </div>
+            <div class="flex justify-center gap-2 mt-2 text-xs">
+              ${pass ? `<span class="bg-green-100 text-green-700 px-2 py-0.5 rounded-full">✓${pass}</span>` : ''}
+              ${warn ? `<span class="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full">!${warn}</span>` : ''}
+              ${fail ? `<span class="bg-red-100 text-red-700 px-2 py-0.5 rounded-full">✕${fail}</span>` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      html += `</div>`;
+
+      // Priority Fixes
+      const failItems = categories.flatMap(c =>
+        c.checks.filter(ch => ch.status === 'fail').map(ch => ({ ...ch, catName: c.name, catIcon: c.icon }))
+      ).sort((a,b) => {
+        const order = { critical:0, important:1, recommended:2 };
+        return (order[a.importance]??1) - (order[b.importance]??1);
+      }).slice(0, 10);
+      const warnItems = categories.flatMap(c =>
+        c.checks.filter(ch => ch.status === 'warning').map(ch => ({ ...ch, catName: c.name, catIcon: c.icon }))
+      ).filter(c => c.importance === 'critical' || c.importance === 'important').slice(0,5);
+      const priorityItems = [...failItems, ...warnItems].slice(0, 12);
+
+      if (priorityItems.length > 0) {
+        html += `<h3 class="text-xl font-bold text-gray-800 mb-4">🔴 Priority Actions Required</h3>`;
+        html += `<div class="space-y-3 mb-8">`;
+        priorityItems.forEach((item, idx) => {
+          const isWarn = item.status === 'warning';
+          html += `
+            <div class="bg-white rounded-xl shadow-sm p-4 border-l-4 ${isWarn ? 'border-yellow-400' : 'border-red-400'}">
+              <div class="flex gap-3">
+                <div class="text-xl">${item.status==='fail'?'❌':'⚠️'}</div>
+                <div class="flex-1">
+                  <div class="flex items-center gap-2 flex-wrap">
+                    <span class="text-xs font-bold px-2 py-0.5 rounded-full ${isWarn ? 'bg-yellow-100 text-yellow-800' : 'bg-red-100 text-red-800'}">${item.importance||'important'}</span>
+                    <span class="text-xs text-gray-500">${item.catIcon} ${item.catName}</span>
+                  </div>
+                  <p class="font-medium text-gray-800 mt-1">#${idx+1} — ${item.name}</p>
+                  <p class="text-sm text-gray-600 mt-1">${item.detail}</p>
+                  ${item.fix ? `<div class="mt-2 text-sm ${fixActionClass(item.status)} p-2 rounded-lg">💡 ${item.fix}</div>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        });
+        html += `</div>`;
+      } else {
+        html += `<div class="bg-green-50 border-l-4 border-green-400 p-4 rounded-lg mb-8"><p class="text-green-800">🎉 No critical issues found! Your store is in excellent shape.</p></div>`;
+      }
+
+      // Detailed Findings
+      html += `<h3 class="text-xl font-bold text-gray-800 mb-4">📋 Detailed Findings</h3>`;
+      categories.forEach((cat, catIdx) => {
+        const sectionId = `section-${catIdx}`;
+        const listId = `list-${catIdx}`;
+        const pass = cat.checks.filter(c=>c.status==='pass').length;
+        const warn = cat.checks.filter(c=>c.status==='warning').length;
+        const fail = cat.checks.filter(c=>c.status==='fail').length;
+        html += `
+          <div class="bg-white rounded-xl shadow-sm mb-4 overflow-hidden print-break">
+            <div class="section-header cursor-pointer flex items-center justify-between p-4 border-b border-gray-100" id="${sectionId}" data-list-id="${listId}">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">${cat.icon}</span>
+                <h4 class="font-semibold text-gray-800">${cat.name}</h4>
+              </div>
+              <div class="flex items-center gap-3">
+                <div class="flex gap-1">
+                  ${pass ? `<span class="bg-green-100 text-green-700 text-xs px-2 py-0.5 rounded-full">✓ ${pass}</span>` : ''}
+                  ${warn ? `<span class="bg-yellow-100 text-yellow-700 text-xs px-2 py-0.5 rounded-full">⚠ ${warn}</span>` : ''}
+                  ${fail ? `<span class="bg-red-100 text-red-700 text-xs px-2 py-0.5 rounded-full">✕ ${fail}</span>` : ''}
+                </div>
+                <span class="text-sm font-semibold px-2 py-1 rounded-full" style="background: ${scoreColor(cat.score)}20; color: ${scoreColor(cat.score)}">${cat.score}/100</span>
+                <svg class="toggle-icon w-5 h-5 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </div>
+            </div>
+            <div class="check-list" id="${listId}" style="display: block;">
+        `;
+        cat.checks.forEach(ch => {
+          html += `
+            <div class="border-b border-gray-50 last:border-0 p-4 hover:bg-gray-50 transition">
+              <div class="flex gap-3">
+                <div class="flex-shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${statusClass(ch.status)} border">
+                  ${statusIcon(ch.status)}
+                </div>
+                <div class="flex-1">
+                  <div class="flex items-center flex-wrap gap-1">
+                    <span class="font-medium text-gray-800">${ch.name}</span>
+                    ${impBadge(ch.importance)}
+                  </div>
+                  <div class="text-sm text-gray-600 mt-1">${ch.detail || '—'}</div>
+                  ${ch.fix && ch.status !== 'pass' ? `<div class="mt-2 text-sm ${fixClass(ch.status)} p-2 rounded-lg">💡 ${ch.fix}</div>` : ''}
+                </div>
+              </div>
+            </div>
+          `;
+        });
+        html += `</div></div>`;
+      });
+
+      container.innerHTML = html;
+
+      // Set main arc color and dash
+      setMainArc(overallScore, scoreColor(overallScore));
+
+      // Add toggle event listeners
+      document.querySelectorAll('.section-header').forEach(header => {
+        header.addEventListener('click', () => {
+          const listId = header.getAttribute('data-list-id');
+          const list = document.getElementById(listId);
+          if (list) {
+            const isOpen = list.style.display !== 'none';
+            list.style.display = isOpen ? 'none' : 'block';
+            header.classList.toggle('open', !isOpen);
+          }
+        });
+      });
+    }
+
+    // Load data
+    const stored = localStorage.getItem('gmcAuditResult');
+    if (stored) {
+      try {
+        const data = JSON.parse(stored);
+        render(data);
+        localStorage.removeItem('gmcAuditResult');
+      } catch (e) {
+        document.getElementById('reportContainer').innerHTML = '<div class="bg-white rounded-2xl shadow-sm p-6 text-center text-red-600">Invalid audit data.</div>';
+      }
+    } else {
+      document.getElementById('reportContainer').innerHTML = '<div class="bg-white rounded-2xl shadow-sm p-6 text-center text-gray-600">No audit data found. Please run an audit first.</div>';
+    }
+
+    // Button handlers
+    document.getElementById('printPdfBtn').addEventListener('click', () => window.print());
+    document.getElementById('closeReportBtn').addEventListener('click', () => window.close());
+  </script>
+</body>
+</html>
